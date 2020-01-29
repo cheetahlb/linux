@@ -97,13 +97,19 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 
 	tmp_opt.saw_tstamp = 0;
 	if (th->doff > (sizeof(*th) >> 2) && tcptw->tw_ts_recent_stamp) {
+        //tmp_opt.has_timestamp_cookie = tcptw->tw_has_cookie;
+        //printk("[%d] RECV MINISOCK ECR!\n",th->source);
 		tcp_parse_options(twsk_net(tw), skb, &tmp_opt, 0, NULL);
 
 		if (tmp_opt.saw_tstamp) {
-			if (tmp_opt.rcv_tsecr)
+            if (tmp_opt.rcv_tsecr) {
+
+//	    tp->rx_opt.rcv_tsecr = tcp_cookie_timestamp_fix(ntohl(*ptr), &tp->rx_opt, sock_net((struct sock*)tp)->ipv4.sysctl_tcp_timestamp_cookie > 1, th->syn) - tp->tsoffset;
 				tmp_opt.rcv_tsecr -= tcptw->tw_ts_offset;
+            }
 			tmp_opt.ts_recent	= tcptw->tw_ts_recent;
 			tmp_opt.ts_recent_stamp	= tcptw->tw_ts_recent_stamp;
+            if (!tcptw->tw_has_cookie)
 			paws_reject = tcp_paws_reject(&tmp_opt, th->rst);
 		}
 	}
@@ -269,7 +275,9 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		tcptw->tw_rcv_nxt	= tp->rcv_nxt;
 		tcptw->tw_snd_nxt	= tp->snd_nxt;
 		tcptw->tw_rcv_wnd	= tcp_receive_window(tp);
+        tcptw->tw_has_cookie = tp->rx_opt.has_timestamp_cookie;
 		tcptw->tw_ts_recent	= tp->rx_opt.ts_recent;
+        tcptw->tw_ts_cookie_wver = tp->rx_opt.ts_cookie | (tp->rx_opt.ts_ver_current << TS_VERSION_BIT);
 		tcptw->tw_ts_recent_stamp = tp->rx_opt.ts_recent_stamp;
 		tcptw->tw_ts_offset	= tp->tsoffset;
 		tcptw->tw_last_oow_ack_time = 0;

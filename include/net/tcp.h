@@ -732,6 +732,68 @@ void tcp_send_window_probe(struct sock *sk);
  */
 #define TCP_TS_HZ	1000
 
+#define DEBUG_TS_COOKIE 0
+
+#define TS_COOKIE_SHIFT 16
+
+#define TCP_TS_COOKIE_OVERLAP  ((1 << TS_COOKIE_SHIFT) - 1 / TCP_TS_HZ)
+
+#define TS_VERSION_BIT 15
+#define TS_LSB_MASK ((1 << TS_COOKIE_SHIFT) - 1)
+
+#define TS_SHIFTED_VALVER_MASK ((1 << TS_COOKIE_SHIFT) - 1)
+#define TS_SHIFTED_VAL_MASK ((1 << TS_VERSION_BIT) - 1)
+#define TS_SHIFTED_VER_MASK (1 << (TS_VERSION_BIT))
+
+#define TS_GET_COOKIE(b) ((b >> TS_COOKIE_SHIFT) & TS_SHIFTED_VAL_MASK)
+#define TS_GET_VERSION(b) (b >> (TS_COOKIE_SHIFT + TS_VERSION_BIT))
+
+#define TS_GET_LSB(b) (b & TS_LSB_MASK)
+
+#if DEBUG_TS_COOKIE
+# define TCP_COOKIE_DEBUG_VERBOSE(sk) , (sock_net((struct sock*)sk)->ipv4.sysctl_tcp_timestamp_cookie > 1)
+#else
+# define TCP_COOKIE_DEBUG_VERBOSE(sk)
+#endif
+
+//Reencode the cookie in the emitted packet
+#if DEBUG_TS_COOKIE
+inline static void tcp_output_cookie_timestamp_set(struct tcp_options_received *rx_opt, u32 *tsval, int verbose) {
+    __u32 original;
+#else
+inline static void tcp_output_cookie_timestamp_set(struct tcp_options_received *rx_opt, u32 *tsval) {
+#endif
+	if (rx_opt->has_timestamp_cookie) {
+        int msb;
+        int version;
+#if DEBUG_TS_COOKIE
+        if (verbose) {
+            printk("WARNING : has_ts without cookie option");
+            return;
+        }
+		original = *tsval;
+#endif
+		msb = *tsval >> TS_COOKIE_SHIFT;
+		version = rx_opt->ts_ver_current;
+		if (rx_opt->ts_real_msb[version] != msb) {
+			version = 1 - version;
+			rx_opt->ts_real_msb[version] = msb;
+#if DEBUG_TS_COOKIE
+		    if (verbose)
+			    printk("OUT TS set version %d to %x\n",version,msb);
+#endif
+			rx_opt->ts_ver_current = version;
+		}
+		*tsval = (*tsval & TS_LSB_MASK) | (rx_opt->ts_cookie | (version << TS_VERSION_BIT)) << TS_COOKIE_SHIFT;
+
+#if DEBUG_TS_COOKIE
+		if (verbose)
+			printk("OUT TS %x, ORIGINAL %x, VERSION %x, LSB %x, cookie %x, real msb %x\n", *tsval,original, version, (*tsval & TS_LSB_MASK), rx_opt->ts_cookie ,  rx_opt->ts_real_msb[version]);
+#endif
+		//dump_stack();
+	}
+}
+
 static inline u64 tcp_clock_ns(void)
 {
 	return ktime_get_ns();
@@ -1426,12 +1488,14 @@ static inline int tcp_fin_time(const struct sock *sk)
 	return fin_timeout;
 }
 
-static inline bool tcp_paws_check(const struct tcp_options_received *rx_opt,
+static inline bool tcp_paws_check(const struct tcp_options_received* rx_opt,
 				  int paws_win)
 {
+
 	if ((s32)(rx_opt->ts_recent - rx_opt->rcv_tsval) <= paws_win)
 		return true;
-	if (unlikely(!time_before32(ktime_get_seconds(),
+	if (unlikely((rx_opt->has_timestamp_cookie && !time_before32(ktime_get_seconds(),
+		    rx_opt->ts_recent_stamp + TCP_TS_COOKIE_OVERLAP))) || (!time_before32(ktime_get_seconds(),
 				    rx_opt->ts_recent_stamp + TCP_PAWS_24DAYS)))
 		return true;
 	/*

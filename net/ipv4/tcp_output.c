@@ -622,6 +622,7 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 	if (likely(sock_net(sk)->ipv4.sysctl_tcp_timestamps && !*md5)) {
 		opts->options |= OPTION_TS;
 		opts->tsval = tcp_skb_timestamp(skb) + tp->tsoffset;
+		//Cookie only supported for echoing as of now. Here we establish a connection, we have nothing to send back
 		opts->tsecr = tp->rx_opt.ts_recent;
 		remaining -= TCPOLEN_TSTAMP_ALIGNED;
 	}
@@ -693,6 +694,7 @@ static unsigned int tcp_synack_options(const struct sock *sk,
 	if (likely(ireq->tstamp_ok)) {
 		opts->options |= OPTION_TS;
 		opts->tsval = tcp_skb_timestamp(skb) + tcp_rsk(req)->ts_off;
+		tcp_output_cookie_timestamp_set(&tcp_sk(sk)->rx_opt, &opts->tsval TCP_COOKIE_DEBUG_VERBOSE(sk) );
 		opts->tsecr = req->ts_recent;
 		remaining -= TCPOLEN_TSTAMP_ALIGNED;
 	}
@@ -747,6 +749,8 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
 	if (likely(tp->rx_opt.tstamp_ok)) {
 		opts->options |= OPTION_TS;
 		opts->tsval = skb ? tcp_skb_timestamp(skb) + tp->tsoffset : 0;
+		if (skb)
+			tcp_output_cookie_timestamp_set(&tp->rx_opt, &opts->tsval TCP_COOKIE_DEBUG_VERBOSE(tp) );
 		opts->tsecr = tp->rx_opt.ts_recent;
 		size += TCPOLEN_TSTAMP_ALIGNED;
 	}

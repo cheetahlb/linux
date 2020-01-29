@@ -85,7 +85,8 @@ struct tcp_sack_block {
 
 /*These are used to set the sack_ok field in struct tcp_options_received */
 #define TCP_SACK_SEEN     (1 << 0)   /*1 = peer is SACK capable, */
-#define TCP_DSACK_SEEN    (1 << 2)   /*1 = DSACK was received from peer*/
+#define TCP_DSACK_SEEN    (1 << 1)   /*1 = DSACK was received from peer*/
+
 
 struct tcp_options_received {
 /*	PAWS/RTTM data	*/
@@ -93,14 +94,18 @@ struct tcp_options_received {
 	u32	ts_recent;	/* Time stamp to echo next		*/
 	u32	rcv_tsval;	/* Time stamp value             	*/
 	u32	rcv_tsecr;	/* Time stamp echo reply        	*/
+	u16 ts_real_msb[2]; /* TCP cookie MSB */
+	u16 ts_cookie;
 	u16 	saw_tstamp : 1,	/* Saw TIMESTAMP on last packet		*/
 		tstamp_ok : 1,	/* TIMESTAMP seen on SYN packet		*/
 		dsack : 1,	/* D-SACK is scheduled			*/
 		wscale_ok : 1,	/* Wscale seen on SYN packet		*/
-		sack_ok : 3,	/* SACK seen on SYN packet		*/
+		sack_ok : 2,	/* SACK seen on SYN packet		*/
+		ts_ver_current : 1, /* Current MSB version */
 		smc_ok : 1,	/* SMC seen on SYN packet		*/
 		snd_wscale : 4,	/* Window scaling received from sender	*/
 		rcv_wscale : 4;	/* Window scaling to send to receiver	*/
+   u8  has_timestamp_cookie : 1; /* TS cookie enabled */
 	u8	num_sacks;	/* Number of SACK blocks		*/
 	u16	user_mss;	/* mss requested by user in ioctl	*/
 	u16	mss_clamp;	/* Maximal mss, negotiated at connection setup */
@@ -110,6 +115,7 @@ static inline void tcp_clear_options(struct tcp_options_received *rx_opt)
 {
 	rx_opt->tstamp_ok = rx_opt->sack_ok = 0;
 	rx_opt->wscale_ok = rx_opt->snd_wscale = 0;
+    rx_opt->has_timestamp_cookie = 0;
 #if IS_ENABLED(CONFIG_SMC)
 	rx_opt->smc_ok = 0;
 #endif
@@ -443,6 +449,9 @@ struct tcp_timewait_sock {
 #ifdef CONFIG_TCP_MD5SIG
 	struct tcp_md5sig_key	  *tw_md5_key;
 #endif
+
+    u16           tw_ts_cookie_wver;
+	u8			  tw_has_cookie : 1;
 };
 
 static inline struct tcp_timewait_sock *tcp_twsk(const struct sock *sk)

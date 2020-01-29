@@ -3743,6 +3743,57 @@ static void tcp_parse_fastopen_option(int len, const unsigned char *cookie,
 	foc->exp = exp_opt;
 }
 
+#if DEBUG_TS_COOKIE
+inline u32 tcp_cookie_timestamp_fix(u32 tsecr, struct tcp_options_received* rx_opt, const int syn, const int verbose) {
+#else
+inline u32 tcp_cookie_timestamp_fix(u32 tsecr, struct tcp_options_received* rx_opt, const int syn) {
+#endif
+#if DEBUG_TS_COOKIE
+    if (unlikely(verbose)) {
+        printk("FIX SYN %d TSECR %d",syn,tsecr);
+    }
+#endif
+    if (syn) {
+                rx_opt->has_timestamp_cookie = 1;
+#if DEBUG_TS_COOKIE
+				rx_opt->ts_cookie = 0;
+				rx_opt->ts_real_msb[0] = 0;
+				rx_opt->ts_real_msb[1] = 0;
+#endif
+    }
+	if (likely(rx_opt->has_timestamp_cookie)) {
+#if DEBUG_TS_COOKIE
+        u32 original;
+        if (unlikely(verbose)) {
+	        original = tsecr;
+        }
+#endif
+		u32 ver = TS_GET_VERSION(tsecr);
+
+		rx_opt->ts_cookie = (u16)(TS_GET_COOKIE(tsecr));
+
+		tsecr = TS_GET_LSB(tsecr) | (rx_opt->ts_real_msb[ver] << TS_COOKIE_SHIFT);
+
+#if DEBUG_TS_COOKIE
+		if (unlikely(verbose)) {
+			printk("Fix TS, parsed cookie is %x, original is %x, version is %d (val %x), LSB %x, fixed is %x",rx_opt->ts_cookie, original,ver,rx_opt->ts_real_msb[ver], TS_GET_LSB(tsecr),tsecr);
+		}
+#endif
+		//dump_stack();
+/*	} else {
+        if (verbose) {
+            printk("TS cookie not enabled\n");
+            if (tsecr && verbose)
+                dump_stack();
+        }*/
+    }
+/*    if (syn) {
+        return 0;
+    }*/
+	return tsecr;
+}
+
+
 static void smc_parse_options(const struct tcphdr *th,
 			      struct tcp_options_received *opt_rx,
 			      const unsigned char *ptr,
@@ -3818,13 +3869,23 @@ void tcp_parse_options(const struct net *net,
 				}
 				break;
 			case TCPOPT_TIMESTAMP:
-				if ((opsize == TCPOLEN_TIMESTAMP) &&
-				    ((estab && opt_rx->tstamp_ok) ||
-				     (!estab && net->ipv4.sysctl_tcp_timestamps))) {
-					opt_rx->saw_tstamp = 1;
-					opt_rx->rcv_tsval = get_unaligned_be32(ptr);
-					opt_rx->rcv_tsecr = get_unaligned_be32(ptr + 4);
-				}
+
+                //printk("[%d] Got TS (slow)\n",fid);
+				if ((opsize == TCPOLEN_TIMESTAMP)) {
+                    u32 ecr = get_unaligned_be32(ptr + 4);
+                    if (net->ipv4.sysctl_tcp_timestamp_cookie) {
+                        ecr = tcp_cookie_timestamp_fix(ecr, opt_rx, th->syn TCP_COOKIE_DEBUG_VERBOSE(skb->sk) );
+                    }
+                    if (((estab && opt_rx->tstamp_ok) ||
+                         (!estab && net->ipv4.sysctl_tcp_timestamps))) {
+                        opt_rx->saw_tstamp = 1;
+                        opt_rx->rcv_tsval = get_unaligned_be32(ptr);
+					    opt_rx->rcv_tsecr = ecr;
+                    }
+				} /*else {
+
+                    printk("[%d] But wrong size (%d)!\n",fid,opsize);
+                }*/
 				break;
 			case TCPOPT_SACK_PERM:
 				if (opsize == TCPOLEN_SACK_PERM && th->syn &&
@@ -3878,20 +3939,26 @@ void tcp_parse_options(const struct net *net,
 }
 EXPORT_SYMBOL(tcp_parse_options);
 
+
 static bool tcp_parse_aligned_timestamp(struct tcp_sock *tp, const struct tcphdr *th)
 {
 	const __be32 *ptr = (const __be32 *)(th + 1);
 
+
 	if (*ptr == htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16)
 			  | (TCPOPT_TIMESTAMP << 8) | TCPOLEN_TIMESTAMP)) {
+        u32 ecr;
+        //printk("[%d] Got TS (fast)\n",th->source);
 		tp->rx_opt.saw_tstamp = 1;
 		++ptr;
 		tp->rx_opt.rcv_tsval = ntohl(*ptr);
 		++ptr;
-		if (*ptr)
-			tp->rx_opt.rcv_tsecr = ntohl(*ptr) - tp->tsoffset;
-		else
-			tp->rx_opt.rcv_tsecr = 0;
+        ecr = ntohl(*ptr);
+        u32 ts = sock_net((struct sock*)tp)->ipv4.sysctl_tcp_timestamp_cookie;
+        if (ts) {
+            ecr = tcp_cookie_timestamp_fix(ecr, &tp->rx_opt, th->syn TCP_COOKIE_DEBUG_VERBOSE(tp) );
+        }
+	    tp->rx_opt.rcv_tsecr = ecr - tp->tsoffset;
 		return true;
 	}
 	return false;
@@ -6008,6 +6075,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 			 */
 			rcu_read_lock();
 			local_bh_disable();
+//		    tcp_cookie_enable(sk, &tp->rx_opt);
 			acceptable = icsk->icsk_af_ops->conn_request(sk, skb) >= 0;
 			local_bh_enable();
 			rcu_read_unlock();
@@ -6428,16 +6496,20 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	tcp_clear_options(&tmp_opt);
 	tmp_opt.mss_clamp = af_ops->mss_clamp;
 	tmp_opt.user_mss  = tp->rx_opt.user_mss;
+
 	tcp_parse_options(sock_net(sk), skb, &tmp_opt, 0,
 			  want_cookie ? NULL : &foc);
 
 	if (want_cookie && !tmp_opt.saw_tstamp)
 		tcp_clear_options(&tmp_opt);
 
+
 	if (IS_ENABLED(CONFIG_SMC) && want_cookie)
 		tmp_opt.smc_ok = 0;
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
+	tp->rx_opt.ts_cookie = tmp_opt.ts_cookie;
+	tp->rx_opt.has_timestamp_cookie = tmp_opt.has_timestamp_cookie;
 	tcp_openreq_init(req, &tmp_opt, skb, sk);
 	inet_rsk(req)->no_srccheck = inet_sk(sk)->transparent;
 

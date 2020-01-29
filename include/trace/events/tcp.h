@@ -151,6 +151,10 @@ DECLARE_EVENT_CLASS(tcp_event_sk,
 			       sk->sk_v6_rcv_saddr, sk->sk_v6_daddr);
 
 		__entry->sock_cookie = sock_gen_cookie(sk);
+		struct tcp_sock *tp = tcp_sk(sk);
+		if (tp->rx_opt.has_timestamp_cookie) {
+			__entry->sock_cookie = __entry->sock_cookie << TS_COOKIE_SHIFT | tp->rx_opt.ts_cookie;
+		}
 	),
 
 	TP_printk("sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c sock_cookie=%llx",

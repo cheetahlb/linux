@@ -882,10 +882,16 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 	struct inet_timewait_sock *tw = inet_twsk(sk);
 	struct tcp_timewait_sock *tcptw = tcp_twsk(sk);
 
+    //printk("Send TW ACK with cookie TSVAL %x\n", tcptw->tw_ts_recent);
+    u32 tsval = tcp_time_stamp_raw() + tcptw->tw_ts_offset;
+    if (tcptw->tw_has_cookie) {
+		tsval = (tsval & TS_LSB_MASK) | (tcptw->tw_ts_cookie_wver) << TS_COOKIE_SHIFT;
+        //tcp_output_cookie_timestamp_set(&rx_opt, &tsval TCP_COOKIE_DEBUG_VERBOSE(sk) );
+    }
 	tcp_v4_send_ack(sk, skb,
 			tcptw->tw_snd_nxt, tcptw->tw_rcv_nxt,
 			tcptw->tw_rcv_wnd >> tw->tw_rcv_wscale,
-			tcp_time_stamp_raw() + tcptw->tw_ts_offset,
+			tsval,
 			tcptw->tw_ts_recent,
 			tw->tw_bound_dev_if,
 			tcp_twsk_md5_key(tcptw),

@@ -136,6 +136,7 @@ struct netns_ipv4 {
 	int sysctl_tcp_sack;
 	int sysctl_tcp_window_scaling;
 	int sysctl_tcp_timestamps;
+	int sysctl_tcp_timestamp_cookie;
 	int sysctl_tcp_early_retrans;
 	int sysctl_tcp_recovery;
 	int sysctl_tcp_thin_linear_timeouts;
