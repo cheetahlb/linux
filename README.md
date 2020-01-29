@@ -15,3 +15,5 @@ To enable the cookie "reflection", set the sysctl parameter as follow:
 
 Then, any connection established will reflect the 16 MSB of the ECR field of a SYN packets to all subsequent packets, except for the single MSB which is used for versioning of the cookie.
 A cookie may be changed, but it must start at the SYN.
+
+Note that this has only works with sequential timestamp, so you need to do `echo 2 | sudo tee /proc/sys/net/ipv4/tcp_timestamps`. Mode 1 could be okay but needs testing. Note the cookie obfuscates the timestamp, so this is not a security thread.
